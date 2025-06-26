@@ -1,99 +1,18 @@
 import { supabase } from '../lib/supabase';
 
-export interface FileUploadResult {
+export interface UploadResult {
   url: string;
   path: string;
   size: number;
-  type: string;
 }
 
-/**
- * Upload file to Supabase Storage
- */
-export const uploadFile = async (
-  file: File,
-  folder: string = 'documents'
-): Promise<FileUploadResult> => {
-  try {
-    // Generate unique filename
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
-    const filePath = `${folder}/${fileName}`;
+export interface FileValidation {
+  valid: boolean;
+  error?: string;
+}
 
-    // Upload file to Supabase Storage
-    const { data, error } = await supabase.storage
-      .from('project-documents')
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false
-      });
-
-    if (error) {
-      throw new Error(`Upload failed: ${error.message}`);
-    }
-
-    // Get public URL
-    const { data: urlData } = supabase.storage
-      .from('project-documents')
-      .getPublicUrl(filePath);
-
-    return {
-      url: urlData.publicUrl,
-      path: filePath,
-      size: file.size,
-      type: file.type
-    };
-  } catch (error) {
-    console.error('File upload error:', error);
-    throw error;
-  }
-};
-
-/**
- * Delete file from Supabase Storage
- */
-export const deleteFile = async (filePath: string): Promise<void> => {
-  try {
-    const { error } = await supabase.storage
-      .from('project-documents')
-      .remove([filePath]);
-
-    if (error) {
-      throw new Error(`Delete failed: ${error.message}`);
-    }
-  } catch (error) {
-    console.error('File delete error:', error);
-    throw error;
-  }
-};
-
-/**
- * Get signed URL for private file access
- */
-export const getSignedUrl = async (
-  filePath: string,
-  expiresIn: number = 3600
-): Promise<string> => {
-  try {
-    const { data, error } = await supabase.storage
-      .from('project-documents')
-      .createSignedUrl(filePath, expiresIn);
-
-    if (error) {
-      throw new Error(`Signed URL generation failed: ${error.message}`);
-    }
-
-    return data.signedUrl;
-  } catch (error) {
-    console.error('Signed URL error:', error);
-    throw error;
-  }
-};
-
-/**
- * Validate file before upload
- */
-export const validateFile = (file: File): { valid: boolean; error?: string } => {
+// File validation
+export const validateFile = (file: File): FileValidation => {
   const maxSize = 10 * 1024 * 1024; // 10MB
   const allowedTypes = [
     'application/pdf',
@@ -102,58 +21,106 @@ export const validateFile = (file: File): { valid: boolean; error?: string } => 
     'application/vnd.ms-powerpoint',
     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     'application/vnd.ms-excel',
-    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    'text/plain'
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   ];
 
   if (file.size > maxSize) {
-    return { valid: false, error: 'File size must be less than 10MB' };
+    return {
+      valid: false,
+      error: 'File size must be less than 10MB'
+    };
   }
 
   if (!allowedTypes.includes(file.type)) {
-    return { valid: false, error: 'File type not supported. Please upload PDF, DOC, PPT, or XLS files.' };
+    return {
+      valid: false,
+      error: 'File type not supported. Please upload PDF, DOC, PPT, or XLS files.'
+    };
   }
 
   return { valid: true };
 };
 
-/**
- * Format file size for display
- */
+// Upload file to Supabase Storage
+export const uploadFile = async (file: File, folderPath: string): Promise<UploadResult> => {
+  try {
+    // Generate unique filename
+    const timestamp = Date.now();
+    const randomString = Math.random().toString(36).substring(2, 15);
+    const fileExtension = file.name.split('.').pop();
+    const fileName = `${timestamp}_${randomString}.${fileExtension}`;
+    const fullPath = `${folderPath}/${fileName}`;
+
+    // Upload to Supabase Storage
+    const { data, error } = await supabase.storage
+      .from('project-documents')
+      .upload(fullPath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (error) {
+      console.error('Supabase upload error:', error);
+      throw new Error(`Upload failed: ${error.message}`);
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('project-documents')
+      .getPublicUrl(fullPath);
+
+    return {
+      url: urlData.publicUrl,
+      path: fullPath,
+      size: file.size
+    };
+  } catch (error) {
+    console.error('File upload error:', error);
+    throw error;
+  }
+};
+
+// Delete file from Supabase Storage
+export const deleteFile = async (filePath: string): Promise<void> => {
+  try {
+    const { error } = await supabase.storage
+      .from('project-documents')
+      .remove([filePath]);
+
+    if (error) {
+      console.error('Supabase delete error:', error);
+      throw new Error(`Delete failed: ${error.message}`);
+    }
+  } catch (error) {
+    console.error('File delete error:', error);
+    throw error;
+  }
+};
+
+// Format file size for display
 export const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 Bytes';
+
   const k = 1024;
   const sizes = ['Bytes', 'KB', 'MB', 'GB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
+
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-/**
- * Get file extension from filename
- */
-export const getFileExtension = (filename: string): string => {
-  return filename.split('.').pop()?.toLowerCase() || '';
-};
-
-/**
- * Get file type icon based on extension
- */
-export const getFileTypeIcon = (filename: string): string => {
-  const ext = getFileExtension(filename);
+// Get file type from extension
+export const getFileType = (filename: string): string => {
+  const extension = filename.split('.').pop()?.toLowerCase();
   
-  switch (ext) {
-    case 'pdf':
-      return '📄';
-    case 'doc':
-    case 'docx':
-      return '📝';
-    case 'ppt':
-    case 'pptx':
-      return '📊';
-    case 'xls':
-    case 'xlsx':
-      return '📈';
-    default:
-      return '📁';
-  }
+  const typeMap: { [key: string]: string } = {
+    'pdf': 'application/pdf',
+    'doc': 'application/msword',
+    'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'ppt': 'application/vnd.ms-powerpoint',
+    'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'xls': 'application/vnd.ms-excel',
+    'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  };
+
+  return typeMap[extension || ''] || 'application/octet-stream';
 };
